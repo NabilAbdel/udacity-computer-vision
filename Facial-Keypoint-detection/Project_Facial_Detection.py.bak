@@ -4,6 +4,14 @@
 # Maxpooling layers
 # Fully-connected (linear) layers
 
+# To define a neural network in PyTorch, you'll 
+# 1. create and name a new neural network class
+# 2. define the layers of the network in a function __init__ 
+# 3. define the feedforward behavior of the network that employs those initialized layers in the function forward, which takes in an input image tensor, x. 
+# The structure of such a class, called Net is shown below.
+# Note: During training, PyTorch will be able to perform backpropagation by keeping track of the network's feedforward behavior 
+# and using autograd to calculate the update to the weights in the network.
+
 import torch.nn as nn
 import torch.nn.functional as F
 import cv2
@@ -17,41 +25,74 @@ class Net(nn.Module):
     def __init__(self, n_classes):
         super(Net, self).__init__()
 
+        # 1 input image channel (grayscale), 32 output channels/feature maps
+        # Load the training image
         image = cv2.imread('./images/face.jpeg')
 
+        # Convert the training image to RGB
         training_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Convert the training image to gray Scale
         training_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+        # Display the images
         plt.subplot(121)
         plt.title('Original Training Image')
         plt.imshow(training_image)
+        # 5x5 square convolution kernel
         self.conv1 = nn.Conv2d(1, 32, 5)
 
+        # maxpool layer
+        # pool with kernel_size=2, stride=2
         self.pool = nn.MaxPool2d(2, 2)
 
+        # fully-connected layer
+        # 32*4 input size to account for the downsampled image size after pooling
+        # num_classes outputs (for n_classes of image data)
         self.fc1 = nn.Linear(32*4, n_classes)
 
+    # define the feedforward behavior
     def forward(self, x):
+        # one conv/relu + pool layers
         x = self.pool(F.relu(self.conv1(x)))
 
+        # prep for linear layer by flattening the feature maps into feature vectors
         x = x.view(x.size(0), -1)
+        # linear layer 
         x = F.relu(self.fc1(x))
 
+        # final output
         return x
 
+# instantiate and print your Net
 n_classes = 20 # example number of classes
 net = Net(n_classes)
 print(net)
 
-x = self.pool(F.relu(self.conv1(x)))
+# Let's go over the details of what is happening in this code.
+# Define the Layers in __init__
+# Convolutional and maxpooling layers are defined in __init__:
+# 1 input image channel (for grayscale images), 32 output channels/feature maps, 3x3 square convolution kernel
+# self.conv1 = nn.Conv2d(1, 32, 3)
 
+# maxpool that uses a square window of kernel_size=2, stride=2
+# self.pool = nn.MaxPool2d(2, 2)      
+# Refer to Layers in forward
+# Then these layers are referred to in the forward function like this, in which the conv1 layer has a ReLu activation applied to it before maxpooling is applied:
+x = self.pool(F.relu(self.conv1(x)))
+# Best practice is to place any layers whose weights will change during the training process in __init__ and refer to them in the forward function; any layers or functions that always behave in the same way, such as a pre-defined activation function, may appear in the __init__ or in the forward function; it is mostly a matter of style and readability.
+
+# import the usual resources
 import matplotlib.pyplot as plt
 import numpy as np
 
+# import utilities to keep workspaces alive during model training
 from workspace_utils import active_session
 
+# watch for any changes in model.py, if it changes, re-load it automatically
 %load_ext autoreload
 %autoreload 2
+
+## TODO: Define the Net in models.py
 
 import torch
 import torch.nn as nn
@@ -64,18 +105,37 @@ from models import Net
 net = Net()
 print(net)
 
+# Transform the dataset
+# To prepare for training, create a transformed dataset of images and keypoints.
+# TODO: Define a data transform
+# In PyTorch, a convolutional neural network expects a torch image of a consistent size as input. For efficient training, and so your model's 
+# loss does not blow up during training, it is also suggested that you normalize the input images and keypoints. 
+# The necessary transforms have been defined in data_load.py and you do not need to modify these; take a look at this file 
+# (you'll see the same transforms that were defined and applied in Notebook 1).
+# To define the data transform below, use a composition of:
+# Rescaling and/or cropping the data, such that you are left with a square image (the suggested size is 224x224px)
+# Normalizing the images and keypoints; turning each RGB image into a grayscale image with a color range of [0, 1] and transforming the given keypoints into a range of [-1, 1]
+# Turning these images and keypoints into Tensors
+# These transformations have been defined in data_load.py, but it's up to you to call them and create a data_transform below. This transform will be applied to the training data and, later, the test data. It will change how you go about displaying these images and keypoints, but these steps are essential for efficient training.
+# As a note, should you want to perform data augmentation (which is optional in this project), and randomly rotate or shift these images, a square image size will be useful; rotating a 224x224 image by 90 degrees will result in the same shape of output.
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 
+# the dataset we created in Notebook 1 is copied in the helper file `data_load.py`
 from data_load import FacialKeypointsDataset
+# the transforms we defined in Notebook 1 are in the helper file `data_load.py`
 from data_load import Rescale, RandomCrop, Normalize, ToTensor
 
 
+## TODO: define the data_transform using transforms.Compose([all tx's, . , .])
+# order matters! i.e. rescaling should come before a smaller crop
 data_transform = None
 
+# testing that you've defined a transform
 assert(data_transform is not None), 'Define a data_transform'
 
+# create the transformed dataset
 transformed_dataset = FacialKeypointsDataset(csv_file='/data/training_frames_keypoints.csv',
                                              root_dir='/data/training/',
                                              transform=data_transform)
@@ -103,16 +163,42 @@ train_loader = DataLoader(transformed_dataset,
                           num_workers=4)
 
 
+# Before training
+# Take a look at how this model performs before it trains. You should see that the keypoints it predicts start off in one spot and don't match 
+# the keypoints on a face at all! It's interesting to visualize this behavior so that you can compare it to the model after training and see how 
+# the model has improved.
+# Load in the test dataset
+# The test dataset is one that this model has not seen before, meaning it has not trained with these images. We'll load in this test data and before 
+# and after training, see how your model performs on this set!
+# To visualize this test data, we have to go through some un-transformation steps to turn our images into python images from tensors and to turn our 
+# keypoints back into a recognizable range.                            
+
+# load in the test data, using the dataset class
+# AND apply the data_transform you defined above
+
+# create the test dataset
 test_dataset = FacialKeypointsDataset(csv_file='/data/test_frames_keypoints.csv',
                                              root_dir='/data/test/',
                                              transform=data_transform)
 
+# load test data in batches
 batch_size = 10
 
 test_loader = DataLoader(test_dataset, 
                           batch_size=batch_size,
                           shuffle=True, 
                           num_workers=4)
+
+# Apply the model on a test sample
+# To test the model on a test sample of data, you have to follow these steps:
+# Extract the image and ground truth keypoints from a sample
+# Wrap the image in a Variable, so that the net can process it as input and track how it changes as the image moves through the network.
+# Make sure the image is a FloatTensor, which the model expects.
+# Forward pass the image through the net to get the predicted, output keypoints.
+# This function test how the network performs on the first batch of test data. It returns the images, the transformed images, 
+# the predicted keypoints (produced by the model), and the ground truth keypoints.
+
+# test the model on a batch of test images
 
 def net_sample_output():
     
@@ -147,6 +233,12 @@ print(test_images.data.size())
 print(test_outputs.data.size())
 print(gt_pts.size())            
 
+# Visualize the predicted keypoints
+# Once we've had the model produce some predicted output keypoints, we can visualize these points in a way that's similar to how we've displayed this data before,
+# only this time, we have to "un-transform" the image/keypoint data to display it.
+# Note that I've defined a new function, show_all_keypoints that displays a grayscale image, its predicted keypoints and its ground truth keypoints 
+# (if provided).
+
 def show_all_keypoints(image, predicted_key_pts, gt_pts=None):
     """Show image with predicted keypoints"""
     # image is grayscale
@@ -156,8 +248,12 @@ def show_all_keypoints(image, predicted_key_pts, gt_pts=None):
     if gt_pts is not None:
         plt.scatter(gt_pts[:, 0], gt_pts[:, 1], s=20, marker='.', c='g')
         	
+# Un-transformation
+# Next, you'll see a helper function. visualize_output that takes in a batch of images, predicted keypoints, and ground truth keypoints and displays a set of those images and their true/predicted keypoints.
+# This function's main role is to take batches of image and keypoint data (the input and output of your CNN), and transform them into numpy images and un-normalized keypoints (x, y) for normal display. The un-transformation process turns keypoints and images into numpy arrays from Tensors and it undoes the keypoint normalization done in the Normalize() transform; it's assumed that you applied these transformations when you loaded your test data.
 
 # visualize the output
+# by default this shows a batch of 10 images
 def visualize_output(test_images, test_outputs, gt_pts=None, batch_size=10):
     for i in range(batch_size):
         plt.figure(figsize=(20,10))
@@ -188,10 +284,27 @@ def visualize_output(test_images, test_outputs, gt_pts=None, batch_size=10):
 # call it
 visualize_output(test_images, test_outputs, gt_pts)
 
+# Training
+# Loss function
+# Training a network to predict keypoints is different than training a network to predict a class; instead of outputting a distribution of classes 
+# and using cross entropy loss, you may want to choose a loss function that is suited for regression, which directly compares a predicted value and target value.
+# Read about the various kinds of loss functions (like MSE or L1/SmoothL1 loss) in this documentation.
+# TODO: Define the loss and optimization
+# Next, you'll define how the model will train by deciding on the loss function and optimizer.
+
+## TODO: Define the loss and optimization
 import torch.optim as optim
 
 criterion = None
 optimizer = None
+
+# Training and Initial Observation
+# Now, you'll train on your batched training data from train_loader for a number of epochs. 
+# To quickly observe how your model is training and decide on whether or not you should modify it's structure or hyperparameters, 
+# you're encouraged to start off with just one or two epochs at first. As you train, note how your the model's loss behaves over time: 
+# does it decrease quickly at first and then slow down? Does it take a while to decrease in the first place? What happens if you change the batch size 
+# of your training data or modify your loss function? etc. 
+# Use these initial observations to make changes to your model and decide on the best architecture before you train for many epochs and create a final model.
 
 def train_net(n_epochs):
 
